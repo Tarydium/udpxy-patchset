@@ -1,0 +1,7 @@
+# This is sample for -U <authlist>
+# comment
+  qwe:asd  
+  
+123:456
+
+## EOF ##
