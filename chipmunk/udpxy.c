@@ -57,6 +57,7 @@
 #include "uopt.h"
 #include "dpkt.h"
 #include "netop.h"
+#include "auth.h"
 
 /* external globals */
 
@@ -217,6 +218,7 @@ read_command( int sockfd, struct server_ctx *srv)
 
     TRACE( (void)tmfprintf( g_flog,  "Reading command from socket [%d]\n",
                             sockfd ) );
+    usleep(50);  /* ..workaround VLC behavior: wait for receiving entire HTTP request, one packet per line */
     hlen = recv( sockfd, httpbuf, sizeof(httpbuf), 0 );
     if( 0>hlen ) {
         rc = errno;
@@ -243,6 +245,11 @@ read_command( int sockfd, struct server_ctx *srv)
 
     TRACE( (void)tmfprintf( g_flog, "Request=[%s], length=[%lu]\n",
                 request, (u_long)rlen ) );
+
+    rc = parse_auth( httpbuf, (size_t)hlen );
+    TRACE( (void)tmfprintf( g_flog, "Auth result=[%d]\n",
+                rc ) );
+    if (rc) return rc;
 
     (void) memset( &srv->rq, 0, sizeof(srv->rq) );
     rc = parse_param( request, rlen, srv->rq.cmd, sizeof(srv->rq.cmd),
@@ -1170,6 +1177,9 @@ usage( const char* app, FILE* fp )
             "\t-M : periodically renew multicast subscription (skip if 0 sec) [default = %d sec]\n",
             (long)DEFAULT_CACHE_LEN, g_uopt.rbuf_msgs, DHOLD_TIMEOUT, g_uopt.nice_incr,
             (int)g_uopt.mcast_refresh );
+    (void)fprintf(fp,
+            "\t-U : authfile (lines are in \"username:userpass\" format) [default = none]\n"
+            );
     (void) fprintf( fp, "Examples:\n"
             "  %s -p 4022 \n"
             "\tlisten for HTTP requests on port 4022, all network interfaces\n"
@@ -1201,9 +1211,9 @@ udpxy_main( int argc, char* const argv[] )
  * those features are experimental and for dev debugging ONLY
  * */
 #ifdef UDPXY_FILEIO
-    static const char UDPXY_OPTMASK[] = "TvSa:l:p:m:c:B:n:R:r:w:H:M:";
+    static const char UDPXY_OPTMASK[] = "TvSa:l:p:m:c:B:n:R:r:w:H:M:U:";
 #else
-    static const char UDPXY_OPTMASK[] = "TvSa:l:p:m:c:B:n:R:H:M:";
+    static const char UDPXY_OPTMASK[] = "TvSa:l:p:m:c:B:n:R:H:M:U:";
 #endif
 
     struct sigaction qact, iact, cact, oldact;
@@ -1272,6 +1282,17 @@ udpxy_main( int argc, char* const argv[] )
 
                       Setlinebuf( g_flog );
                       custom_log = 1;
+                      break;
+
+            case 'U':
+                      base64_init();
+                      rc = read_authfile(optarg);   /* ..fills valid_users[] */
+                      if (rc < 0) {
+                        (void) fprintf( stderr, "Error reading authfile "
+                                "[%s]: %d, %s\n",
+                                optarg, rc, strerror(errno) );
+                        rc = ERR_PARAM;
+                      }
                       break;
 
             case 'B':
